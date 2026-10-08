@@ -73,7 +73,7 @@ function savedPresets(ctx: Context): SavedPreset[] {
     .map((entry) => {
       const raw: unknown = entry.options.config
       const config = isRecord(raw) ? structuredClone(raw) : {}
-      const problem = blocked(entry) ?? (isJsExpr(raw) ? 'expression preset config' : undefined)
+      const problem = isJsExpr(raw) ? 'expression preset config' : blocked(entry)
       if (problem !== undefined) return { entry, config, scan: undefined, problem }
       try {
         return { entry, config, scan: scanPreset(config), problem: undefined }
@@ -88,7 +88,7 @@ function liveBackends(ctx: Context): LiveBackend[] {
     const engine = ctx.agentPresets.serviceFor(agent, 'compaction') ?? agent.ctx.get('compaction')
     // Cordis gives each service lookup a fresh caller proxy; deduplicate its owner.
     const owner = engine === undefined ? undefined
-      : (engine as CompactionEngine & { [symbols.original]?: CompactionEngine })[symbols.original] ?? engine
+      : (engine as CompactionEngine & { [symbols.original]: CompactionEngine })[symbols.original]
     return { agent, preset: ctx.agentPresets.composedPreset(agent.ctx), engine: owner }
   })
 }

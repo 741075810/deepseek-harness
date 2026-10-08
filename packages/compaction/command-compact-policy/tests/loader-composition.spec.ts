@@ -16,7 +16,7 @@ import { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
 import ConfigEditor from '@deepseek-ai/dsh-config-editor'
 import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -30,7 +30,7 @@ import { hasExpression, scanPreset } from '../src/presets.ts'
 class Adapter extends LlmAdapter {
   readonly resolved: string[] = []
   override listModels(provider: string) { return Promise.resolve([{ provider, id: 'catalog', name: 'Catalog' }]) }
-  override resolveModel(provider: string, model: string) {
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     this.resolved.push(model)
     return Promise.resolve({ provider, id: model, name: model,
       context: { contextWindow: 100_000 }, defaultMaxTokens: 5_000 })
@@ -66,7 +66,9 @@ function preset(id: string, backend = '@deepseek-ai/dsh-compaction-basic') {
   }
 }
 
-async function harness(headroomTokens: number | null = 16_384) {
+async function harness(
+  headroomTokens: number | null = 16_384, extra: Record<string, unknown>[] = [], included?: Record<string, unknown>[],
+) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-compact-policy-'))
   roots.push(root)
   const dir = join(root, 'profile')
@@ -76,7 +78,7 @@ async function harness(headroomTokens: number | null = 16_384) {
   await writeFile(join(root, 'package.json'), '{"name":"test-installation"}\n')
   await writeFile(join(bundle, 'package.json'), JSON.stringify({ name: 'test-policy-bundle', version: '1.0.0',
     dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
-  const rows = [
+  const rows: Record<string, unknown>[] = [
     { id: 'llm', name: '@deepseek-ai/dsh-llm' },
     { id: 'session', name: '@deepseek-ai/dsh-session' },
     { id: 'projection', name: '@deepseek-ai/dsh-session-projection' },
@@ -92,6 +94,10 @@ async function harness(headroomTokens: number | null = 16_384) {
     { id: 'preset-none', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'none', plugins: [] } },
     { id: 'policy', name: '@deepseek-ai/dsh-command-compact-policy', config: headroomTokens === null ? {} : { headroomTokens } },
   ]
+  rows.push(...extra)
+  if (included !== undefined) {
+    await writeFile(join(dir, 'included.yml'), yaml.dump(included, { schema: entryListSchema }))
+  }
   await writeFile(join(bundle, 'cordis.patch.yml'), yaml.dump([{ insert: rows }], { schema: entryListSchema }))
   await writeFile(join(dir, 'cordis.yml'), '[]\n')
   const profile: ProfileContext = { name: 'test', startedBundles: ['test-policy-bundle'], dir,
@@ -281,6 +287,107 @@ describe('compact-policy real Loader/profile composition', () => {
     expect(await readFile(test.profile.patchPath, 'utf8')).toContain('headroomTokens: 16384')
   })
 
+  it('reports conditional, disabled, inactive, expression and invalid saved declarations without mutation', async () => {
+    const test = await harness(16_384, [
+      { ...preset('disabled'), disabled: true },
+      { id: 'conditional-parent', name: 'cordis:group', group: true, disabled: { __jsExpr: 'false' }, config: [preset('conditional')] },
+      { id: 'inactive', name: '@deepseek-ai/dsh-agent-preset', config: null },
+      { id: 'expression', name: '@deepseek-ai/dsh-agent-preset', config: { __jsExpr: "({ id: 'expression', plugins: [] })" } },
+      { id: 'invalid', name: '@deepseek-ai/dsh-agent-preset', config: { id: 'invalid', plugins: [
+        { id: 'bad-basic', name: '@deepseek-ai/dsh-compaction-basic', config: { unknown: 1 } },
+      ] } },
+    ])
+    const output = await test.run()
+    expect(output.result.text).toContain('saved preset-disabled (preset=disabled): skipped disabled entry or parent')
+    expect(output.result.text).toContain('saved preset-conditional (preset=conditional): skipped conditional entry or parent')
+    expect(output.result.text).toContain('saved inactive (preset=unknown): skipped inactive entry')
+    expect(output.result.text).toContain('saved expression (preset=unknown): skipped expression preset config')
+    expect(output.result.text).toContain('unknown key')
+    const applied = await test.run(' apply')
+    expect(applied.result.text).toContain('saved expression: skipped expression preset config')
+    expect(applied.result.text).toContain('saved invalid: skipped BasicCompactionConfig')
+  })
+
+  it('inspects read-only Includes and distinguishes custom, absent, route-free and nonreceiving Agents', async () => {
+    const test = await harness(16_384, [
+      { id: 'nested', name: 'cordis:include', config: { path: 'included.yml' } },
+    ], [preset('included')])
+    await test.create('custom-view', 'custom')
+    await test.create('none-view', 'none')
+    await test.create('preview-view')
+    await test.ctx.agents.create({ sessionId: SessionId('route-free'),
+      setup: async (ctx) => { await test.ctx.agentPresets.mount(ctx, 'first') } })
+    await test.ctx.agents.create({ sessionId: SessionId('preset-free') })
+    const output = await test.run()
+    expect(output.result.text).toContain('custom backend; pressure inspection unsupported')
+    expect(output.result.text).toContain('none-view (preset=none): no compaction backend')
+    expect(output.result.text).toContain('live preset-free (preset=none): no compaction backend')
+    expect(output.result.text).toContain('live preview-view (preset=first)')
+    expect(output.result.text).toContain('routed capacity unresolved; no effective threshold claimed')
+    expect(output.result.text).toContain('preset included: no root-addressable configuration entry')
+    expect((await test.run(' apply')).result.text).toContain('live preset-free (preset=none): skipped no compaction backend')
+  })
+
+  it('reports catalog and exact-model lookup failures without claiming a routed threshold', async () => {
+    const test = await harness()
+    vi.spyOn(test.adapter, 'listModels').mockRejectedValue(new Error('directory offline'))
+    vi.spyOn(test.adapter, 'resolveModel').mockRejectedValue('model unavailable')
+    const output = await test.run()
+    expect(output.result.text).toContain('catalog test: directory offline')
+    expect(output.result.text).toContain('model test/unlisted: model unavailable')
+    expect(output.result.text).toContain('routed capacity unresolved; no effective threshold claimed')
+  })
+
+  it('keeps unknown capacities explicit during both inspection and pressure updates', async () => {
+    const test = await harness()
+    vi.spyOn(test.adapter, 'resolveModel').mockImplementation((provider, id) => Promise.resolve({ provider, id, name: id }))
+    expect((await test.run()).result.text).toContain('context capacity unknown, summaryCap=30000')
+    expect((await test.run(' apply')).result.kind).toBe('success')
+  })
+
+  it('prices absent output reservations as zero and identifies a coincident ratio/budget limit', async () => {
+    const test = await harness()
+    vi.spyOn(test.adapter, 'resolveModel').mockImplementation((provider, id) => Promise.resolve({ provider, id, name: id,
+      context: { contextWindow: 100_000 } }))
+    test.agent.session.append('request/header', { reason: 'initial', header: { config: { provider: 'test', model: 'unlisted' } } })
+    expect((await test.run()).result.text).toContain('reserve=0, threshold=70000, limit=ratio+budget')
+    expect((await test.run(' apply')).result.kind).toBe('success')
+  })
+
+  it('reports an invalid durable reservation through inspection without mutating policy', async () => {
+    const test = await harness()
+    const before = test.engine().config
+    test.agent.session.append('request/header', { reason: 'initial',
+      header: { config: { provider: 'test', model: 'unlisted', maxTokens: 100_000 } } })
+    expect((await test.run()).result.text).toContain('leaving no message budget')
+    expect(test.engine().config).toBe(before)
+  })
+
+  it('persists a clean literal backend without adding model overrides or skipped-branch diagnostics', async () => {
+    const test = await harness()
+    const entry = test.ctx.configEditor.entries().find(row => row.options.id === 'preset-first')
+    if (entry === undefined) throw new Error('preset-first was missing')
+    await test.ctx.configEditor.edit(entry, current => ({ ...current, plugins: [
+      { id: 'clean-realm', name: 'cordis:group', group: true, isolate: { compaction: true }, config: [
+        { id: 'basic', name: '@deepseek-ai/dsh-compaction-basic', config: {
+          thresholdRatio: 0.7, headroomTokens: 20_000, retainTokens: 100, auto: false,
+        } },
+      ] },
+    ] }))
+    expect((await test.run(' apply')).result.text).toContain('saved preset-first: applied 1 literal backend(s)\n')
+  })
+
+  it('canonicalizes an owner returned through the public service lookup method', async () => {
+    const test = await harness()
+    const backend = test.engine()
+    const lookup = test.ctx.agentPresets.serviceFor(test.agent, 'compaction')
+    if (!(lookup instanceof BasicCompactionEngine)) throw new Error('expected Basic lookup')
+    const original = (lookup as BasicCompactionEngine & { [symbols.original]: BasicCompactionEngine })[symbols.original]
+    expect(lookup === backend).toBe(false)
+    expect(original === backend).toBe(true)
+    expect((await test.run()).result.text).toContain('live receiving (preset=first, receiving)')
+  })
+
   it('rejects scoped placement and invalid pressure settings at activation', async () => {
     const test = await harness()
     const scope = createScope(test.ctx, {})
@@ -312,5 +419,7 @@ describe('raw preset branches', () => {
     expect(hasExpression(raw)).toBe(true)
     expect(raw).toEqual(before)
     expect(() => scanPreset({ plugins: [{ name: '@deepseek-ai/dsh-compaction-basic', config: { unknown: 1 } }] })).toThrow('unknown key')
+    expect(scanPreset({ plugins: 1 }).notes).toContain('plugins: skipped non-literal plugin list')
+    expect(scanPreset({ plugins: [{ name: '@deepseek-ai/dsh-compaction-basic' }] }).rows).toHaveLength(1)
   })
 })

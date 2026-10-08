@@ -43,6 +43,10 @@ describe('pressure-only configuration', () => {
     expect(next).toEqual({ ...source, thresholdRatio: 0.8,
       modelPolicies: source.modelPolicies?.map(policy => ({ ...policy, thresholdRatio: 0.8 })) })
     expect(withPressurePolicy({}, { thresholdRatio: 0.8 })).toEqual({ thresholdRatio: 0.8 })
+    expect(withPressurePolicy({ modelPolicies: [{ provider: 'p', model: 'inherited' }] }, { thresholdRatio: 0.8 }))
+      .toEqual({ thresholdRatio: 0.8, modelPolicies: [
+        { provider: 'p', model: 'inherited', thresholdRatio: 0.8 },
+      ] })
     expect(withPressurePolicy({}, { thresholdRatio: 0.8, headroomTokens: 0 }))
       .toEqual({ thresholdRatio: 0.8, headroomTokens: 0, maxTokens: 65_536 })
     expect(withPressurePolicy({ headroomTokens: 100, maxTokens: 7,
