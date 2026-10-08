@@ -21,6 +21,7 @@ import {
   resolveConfig,
   resolveTargetPolicy,
   TargetPressureConfigError,
+  withPressurePolicy,
 } from './config.ts'
 import {
   assertNoActiveCompaction,
@@ -32,6 +33,8 @@ import type { SummarizationInput, SummaryResult } from './summarizer.ts'
 import type {
   BasicCompactionConfig,
   ModelCompactPolicyConfig,
+  PressurePolicyConfig,
+  PressurePolicyTarget,
   ResolvedConfig,
 } from './types.ts'
 
@@ -39,11 +42,21 @@ export type {
   BasicCompactionConfig,
   CompactionPolicyConfig,
   ModelCompactPolicyConfig,
+  PressurePolicyConfig,
+  PressurePolicyTarget,
   ResolvedCompactSpec,
   ResolvedConfig,
   ResolvedRetention,
   ResolvedTargetPolicy,
 } from './types.ts'
+
+export {
+  resolveCompactSpec,
+  resolveConfig,
+  resolveTargetPolicy,
+  TargetPressureConfigError,
+  withPressurePolicy,
+} from './config.ts'
 
 /** Resolve the exact provider/model durably routed for the latest request. */
 function routedTarget(
@@ -127,8 +140,10 @@ export class BasicCompactionEngine extends CompactionEngine {
     auto: z.boolean(),
   })
 
-  /** Resolved and validated compaction configuration. */
-  readonly config: ResolvedConfig
+  private currentConfig: ResolvedConfig
+
+  /** Immutable resolved configuration; pressure updates replace it atomically. */
+  get config(): ResolvedConfig { return this.currentConfig }
 
   private readonly warnedPressureConfigTargets = new Set<string>()
   private readonly overflowRetries = new WeakMap<Agent, number>()
@@ -136,8 +151,33 @@ export class BasicCompactionEngine extends CompactionEngine {
 
   constructor(ctx: Context, config: BasicCompactionConfig = {}) {
     super(ctx)
-    this.config = resolveConfig(config)
+    this.currentConfig = resolveConfig(config)
     if (this.config.auto) this._registerAutomaticCompaction()
+  }
+
+  /**
+   * Validate and synchronously commit pressure settings for this backend. Every
+   * supplied capacity must fit before any setting changes. Retention, summary
+   * routes and caps, retries, and automatic listeners are preserved.
+   * @param pressure - replacement settings for defaults and existing exact-target overrides.
+   * @param targets - known adapter capacities and request reservations to validate.
+   * @returns the newly committed immutable configuration.
+   */
+  applyPressurePolicy(
+    pressure: PressurePolicyConfig,
+    targets: readonly PressurePolicyTarget[],
+  ): ResolvedConfig {
+    const current = this.config
+    const next = resolveConfig(withPressurePolicy({
+      ...current,
+      modelPolicies: current.modelPolicies.map(policy => ({ ...policy })),
+    }, pressure))
+    for (const { target, contextWindow, reservedCompletionTokens } of targets) {
+      resolveCompactSpec(resolveTargetPolicy(next, target), contextWindow, reservedCompletionTokens)
+    }
+    this.currentConfig = next
+    this.warnedPressureConfigTargets.clear()
+    return next
   }
 
   /**

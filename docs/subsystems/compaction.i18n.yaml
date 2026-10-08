@@ -17,6 +17,9 @@
 /compaction/the-service:
   en: 3b7544ff9cc0f0db
   zh: e9a5e4c6c412eab0
+/compaction/basic-pressure-policy-updates:
+  en: e846a287d0662dc0
+  zh: 8cb13af8a5c71aab
 /compaction/tool-result-pruning-outcomes:
   en: 27091b0a3d454575
   zh: e22431e27e1349f2

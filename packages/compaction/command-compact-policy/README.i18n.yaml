@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/compaction/command-compact-policy/README.md
+/:
+  en: 3366f726f71e18b6
+  zh: 0479c3f66a8d5f96
+/deepseek-ai-dsh-command-compact-policy:
+  en: e3a432626cbcb436
+  zh: 4c458de103d0ba42
+/deepseek-ai-dsh-command-compact-policy/summary:
+  en: 14e53e41069927dd
+  zh: 344a1163325ccb0e
+/deepseek-ai-dsh-command-compact-policy/table-of-contents:
+  en: ebf34991235b7ed7
+  zh: 2231fc75227ccd52
+/deepseek-ai-dsh-command-compact-policy/use-this-package:
+  en: 792faf9583dc5b2b
+  zh: 844955af5912ea66
+/deepseek-ai-dsh-command-compact-policy/pressure-accounting:
+  en: 792758b8bc1e9443
+  zh: 746b227025ffcb12
+/deepseek-ai-dsh-command-compact-policy/apply-and-lifetime:
+  en: 8a7bd5d19ad75669
+  zh: a4403358afc1f400
+/deepseek-ai-dsh-command-compact-policy/further-exploration:
+  en: 96949c0f02d768b9
+  zh: b8914a035ef7a227
+/deepseek-ai-dsh-command-compact-policy/model-experience:
+  en: 9b579a66266fabaf
+  zh: 4e38cf6975fe093a
+/deepseek-ai-dsh-command-compact-policy/model-experience/kv-cache-effect:
+  en: 636900189698419f
+  zh: c9c89d67c86595f1
+/deepseek-ai-dsh-command-compact-policy/known-limitations-and-deferred-work:
+  en: f12bdbf1c351200f
+  zh: 328e1e9afac1f0af
+/deepseek-ai-dsh-command-compact-policy/known-limitations-and-deferred-work/dev-note:
+  en: 32516490f40c3058
+  zh: 4bae6c5876e7f3a0

@@ -103,6 +103,8 @@ function dirOf(url: string): string {
 interface SdkAssertions {
   /** Additional profile patches applied after the shared composition. */
   patches?: readonly string[]
+  /** Scenario-owned profile user layer, editable through ConfigEditor. */
+  profilePatch?: string
   /** Final response required from a completed turn before updating goldens. */
   expectedFinalResponse?: string
   /** Environment overrides passed to the runtime subprocess. */
@@ -125,6 +127,10 @@ interface SdkAssertions {
 }
 
 const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
+  'compact-policy': {
+    profilePatch: fileURLToPath(new URL('./compact-policy/preset.cordis.patch.yml', import.meta.url)),
+    expectedFinalResponse: 'COMPACT_POLICY_OK',
+  },
   'dynamic-tool-updates': {
     expectedFinalResponse: 'DONE',
   },
@@ -352,7 +358,7 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
+    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', JSON.stringify(cwd).slice(1, -1)))
     return destination
   }))
 }
@@ -561,6 +567,10 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const assertions = SDK_ASSERTIONS[scenario.name] ?? {}
   const patches = [...authoredPatches(scenario, !recording), ...assertions.patches ?? []]
     .map((patch, index) => materializeProfilePatch(patch, cwd, 'sdk', patchRoot, index))
+  if (assertions.profilePatch !== undefined) {
+    const userPatch = materializeProfilePatch(assertions.profilePatch, cwd, 'sdk', patchRoot, patches.length)
+    await writeFile(join(dshHome, 'profiles', 'sdk', 'cordis.patch.yml'), await readFile(userPatch, 'utf8'))
+  }
   let childSessionsRoot: string | undefined
   let childEnvironment: Record<string, string> = {}
   if (assertions.dshSdkChild !== undefined) {
@@ -924,13 +934,20 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
           expect(event.data).not.toHaveProperty('schema')
         }
       }
+      if (scenario.name === 'compact-policy') {
+        const events = results.flatMap(result => result.events)
+        expect(events.filter(event => event.type === 'command/run').map(event => event.data['args']))
+          .toEqual(['', ' apply', ' status'])
+        expect(events.filter(event => event.type === 'command/done').map(event => event.data['kind']))
+          .toEqual(['success', 'success', 'success'])
+      }
       if (assertions.expectedFinalResponse !== undefined) {
         expect(results.at(-1)?.finalResponse, `${scenario.name}: final response`).toBe(assertions.expectedFinalResponse)
         const parent = ordered[0]
         if (parent === undefined) throw new Error(`${scenario.name}: no primary session log`)
         const turnEnds = records(parent.content).filter(record => record.type === 'turn/end')
         expect(turnEnds, `${scenario.name}: completed turns`).toHaveLength(results.length)
-        for (const turnEnd of turnEnds) expect(turnEnd).toMatchObject({ data: { reason: { kind: 'completed' } } })
+        for (const turnEnd of turnEnds) expect(turnEnd, JSON.stringify(turnEnd)).toMatchObject({ data: { reason: { kind: 'completed' } } })
       }
 
       let expectedContents = retained && !refreshing

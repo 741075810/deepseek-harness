@@ -1,0 +1,36 @@
+# Opt-in pressure command over the shipped SDK profile.
+- id: permission
+  disabled: true
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+- id: approval
+  config:
+    policy: never
+- id: skill
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none
+- id: session-log-deepseek
+  disabled: true
+- insert:
+    - id: snapshot-presets
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config:
+        default: first
+    - id: snapshot-compact-policy
+      name: '@deepseek-ai/dsh-command-compact-policy'
+      config:
+        headroomTokens: 16384
+    - id: snapshot-policy-control
+      name: './policy-control.mjs'

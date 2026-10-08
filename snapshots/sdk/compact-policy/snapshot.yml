@@ -1,0 +1,8 @@
+version: 1
+scenario: compact-policy
+profile: sdk
+composition: sdk-compact-policy
+recording: authored
+header:
+  class: sdk-compact-policy
+  pin: true

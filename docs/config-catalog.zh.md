@@ -675,13 +675,32 @@ export type ThemePreference = typeof THEME_PREFERENCES[number]
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-theme -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-command-compact-policy -->
+<a id="deepseek-aidsh-command-compact-policy"></a>
+
+## `@deepseek-ai/dsh-command-compact-policy`
+
+- `inject`: `commands` · `agents` · `agentPresets` · `configEditor` · `llm`
+- `source`: [`packages/compaction/command-compact-policy/src/index.ts:31`](../packages/compaction/command-compact-policy/src/index.ts)
+
+```ts config-catalog
+/** Deployment-selected pressure settings; no model, request, or summary cap is configured here. */
+export interface Config {
+  /** Pressure fraction applied to defaults and existing model overrides. Defaults to 0.8. */
+  readonly thresholdRatio: number
+  /** Replacement headroom; omission preserves each existing value. */
+  readonly headroomTokens?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-command-compact-policy -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-compaction-basic -->
 <a id="deepseek-aidsh-compaction-basic"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
 
 - `inject`: `llm` · `tokenMeter` · `sessions`
-- `source`: [`packages/compaction/compaction-basic/src/types.ts:40`](../packages/compaction/compaction-basic/src/types.ts)
+- `source`: [`packages/compaction/compaction-basic/src/types.ts:58`](../packages/compaction/compaction-basic/src/types.ts)
 
 ```ts config-catalog
 /** Basic compaction configuration with an optional exact-target policy table. */
