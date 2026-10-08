@@ -44,6 +44,9 @@
 /llm-streaming/official-deepseek-request-extensions:
   en: b19f291f094157ed
   zh: 682f13a833e8bb52
+/llm-streaming/llmdispatchobserver:
+  en: cb662a6be0b481fc
+  zh: 421546948938659f
 /llm-streaming/service-and-provider-contracts:
   en: 8dc79d4cc82824c2
   zh: 3ebabd3a117ad717

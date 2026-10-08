@@ -1,0 +1,7 @@
+version: 1
+scenario: compaction-bounded-failure
+profile: headless
+composition: compaction-bounded
+recording: authored
+header:
+  class: compaction-bounded

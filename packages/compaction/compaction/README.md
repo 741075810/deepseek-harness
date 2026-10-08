@@ -79,6 +79,8 @@ The contract is three abstract operations a backend implements: `compactIfNeeded
 
 A backend that summarizes through `ctx.llm.stream()` must forward the abort signal into the call's `GenerateOptions.signal`, so an abort or fiber dispose tears down the in-flight summarization. Automatic and explicit-region brackets recover their numeric owner from the open turn; manual brackets require no open turn and stamp `turn: null`.
 
+A backend may use multiple auxiliary calls for one summary, but commits one final checkpoint only after all required work completes and passes stability and shrink validation. The successful summary records ordered call facts; when no summary was committed, a failed closing event may retain settled calls without a replacement. The single-call marker and the bounded call collection are distinct representations. The [subsystem reference](../../../docs/subsystems/compaction.md) defines their fields and replay semantics.
+
 ### Manual failure taxonomy
 
 The synchronous `compaction/summary-error` waterfall lets a backend request durable input recovery for a failed summary and an explicit selection. A listener returns true only after recording progress, or calls `next()` to delegate. The backend checks cancellation and selection stability before dispatch, then re-derives and re-prices input before retrying. The event declaration documents its payload; image policy belongs to `dsh-compaction-image-offload`.
@@ -157,7 +159,7 @@ A successful backend replacement invalidates reuse from the first shadowed histo
 These limits describe what condensation cannot do, regardless of which backend is loaded; they are the current package constraints.
 
 - **Human command, not a model tool** — condensation is triggered by the `/compact` command and by automatic pressure; no model-facing compaction tool is registered.
-- **Some single-unit overflow is out of contract** — balanced summary compaction cannot split one indivisible unit. The optional pruning companion can still repair a closed tool pair when text-bearing tool-result bulk is removable; a large non-tool node or a tool unit whose non-prunable remainder is oversized cannot be compacted.
+- **Replacement edges must remain balanced** — a backend cannot cut an unanswered tool-call/result pair. A backend may fragment oversized selected history for auxiliary summarization without splitting the replacement range; range selection can still leave no useful span outside retained history. The [basic backend](../compaction-basic/README.md) owns its input bounds and recovery limits.
 - **An envelope that alone approaches the window is not surface-compaction work** — compaction shrinks derived history, never the system prompt, tools, or session prefix.
 
 <a id="dev-note"></a>

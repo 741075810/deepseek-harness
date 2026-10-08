@@ -103,6 +103,11 @@
     },
     {
       "doc": "docs/subsystems/llm-streaming.md",
+      "symbol": "LlmDispatchObserver",
+      "source": "packages/llm/llm/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/llm-streaming.md",
       "symbol": "RequestUserInput",
       "source": "packages/llm/llm/src/types.ts"
     },
@@ -1505,6 +1510,11 @@
       "doc": "docs/subsystems/skills.md",
       "symbol": "Config",
       "source": "packages/skill/skill/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/compaction.md",
+      "symbol": "CompactionLlmCall",
+      "source": "packages/compaction/compaction/src/types.ts"
     },
     {
       "doc": "docs/subsystems/compaction.md",

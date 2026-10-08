@@ -10,7 +10,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter as pathDelimiter } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-compaction'
+import type { CompactionLlmCall } from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
@@ -459,7 +459,7 @@ export function parseSessionHeader(text: string): {
  * @param events - the recorded session's events.
  * @returns one `chunks` entry per recorded model call, in call order.
  */
-export function deriveReplayScript(events: SessionEvent[]): ReplayEntry[] {
+export function deriveReplayScript(events: readonly SessionEvent[]): ReplayEntry[] {
   const script: ReplayEntry[] = []
   const close = (key: string | undefined, chunks: StreamChunk[]): void => {
     if (chunks.length === 0) return
@@ -471,7 +471,21 @@ export function deriveReplayScript(events: SessionEvent[]): ReplayEntry[] {
     }
     script.push({ kind: 'chunks', chunks })
   }
+  const appendCall = (call: Pick<CompactionLlmCall, 'rawOutput' | 'finish' | 'usage'>): void => {
+    const chunks: StreamChunk[] = []
+    for (const [index, block] of call.rawOutput.entries()) {
+      chunks.push({ type: 'block-start', index, blockType: block.type })
+      chunks.push({ type: 'block-end', index, block })
+    }
+    if (call.usage !== undefined) chunks.push({ type: 'usage', usage: call.usage })
+    chunks.push({ type: 'finish', reason: call.finish })
+    script.push({ kind: 'chunks', chunks })
+  }
   for (const event of events) {
+    if (event.type === 'compaction/end' && event.data.llmCalls !== undefined) {
+      for (const call of event.data.llmCalls) appendCall(call)
+      continue
+    }
     if (event.type === 'compaction/summary') {
       // JSONL decoding crosses an untyped durable boundary, so retain its wider
       // shape even though current in-process producers enforce this correlation.
@@ -480,18 +494,18 @@ export function deriveReplayScript(events: SessionEvent[]): ReplayEntry[] {
         readonly rawOutput?: ContentBlock[]
         readonly usage?: TokenUsage
       } = event.data
+      if (event.data.llmCalls !== undefined) {
+        if (persisted.llmStreamCall === true) {
+          throw new Error('llm-replay: compaction/summary cannot mark both one stream call and a bounded call collection')
+        }
+        for (const call of event.data.llmCalls) appendCall(call)
+        continue
+      }
       if (persisted.llmStreamCall === true) {
         if (persisted.rawOutput === undefined) {
           throw new Error('llm-replay: compaction/summary marks an LLM stream call without rawOutput')
         }
-        const chunks: StreamChunk[] = []
-        for (const [index, block] of persisted.rawOutput.entries()) {
-          chunks.push({ type: 'block-start', index, blockType: block.type })
-          chunks.push({ type: 'block-end', index, block })
-        }
-        if (persisted.usage !== undefined) chunks.push({ type: 'usage', usage: persisted.usage })
-        chunks.push({ type: 'finish', reason: { kind: 'stop' } })
-        script.push({ kind: 'chunks', chunks })
+        appendCall({ rawOutput: persisted.rawOutput, finish: { kind: 'stop' }, ...persisted.usage === undefined ? {} : { usage: persisted.usage } })
       }
       continue
     }

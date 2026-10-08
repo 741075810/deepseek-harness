@@ -778,6 +778,20 @@ interface LlmCallConfigAdapterDefaults {
 
 The [wire reference](../deepseek-llm-api-wire-extensions.md) defines the exact request headers, extension transaction, field versions, and receiver obligations. The shipped composition registers [`dsh_session_log`](../../packages/session/session-log-deepseek/README.md) as a lossless incremental canonical-log suffix and [`dsh_plugin_packages`](../../packages/llm/plugin-package-inventory-deepseek/README.md) as the complete active Loader-backed package set. These fields remain outside model messages and are absent from the pi-ai adapter path.
 
+## `LlmDispatchObserver`
+
+The optional second argument to `LlmRuntime.stream()` observes the dispatched call. The [LLM package](../../packages/llm/llm/README.md#use-this-package) owns its timing and forwarding rules.
+
+```ts type-equiv
+/**
+ * Observe the resolved, projected request immediately before adapter dispatch.
+ * Middleware short-circuits do not invoke this synchronous observer.
+ * @param request - effective adapter input, including resolved model defaults.
+ * @param model - metadata bound to the same selected adapter.
+ */
+type LlmDispatchObserver = (request: GenerateOptions, model: LlmResolvedModelInfo) => void
+```
+
 ## Service and provider contracts
 
 `LlmAdapter` is the provider contract: subclass, implement `stream()`, and register one adapter instance with `ctx.llm.registerAdapter(providers, adapter)`. `GenerateOptions.provider` selects the registered adapter; `GenerateOptions.model` is passed to that adapter and need not be registered at lifecycle start. Duplicate provider routes fail atomically. Optional `providerRetryPolicy()` is captured per route with normal defaults, while `providerInfo()` and asynchronous `listModels()` feed `LlmRuntime.listProviders()` / `listModels()` with detached selector metadata. That catalog is advisory rather than a request whitelist: the adapter remains authoritative and may accept unlisted model ids. One asynchronous `resolveModel()` query returns exact model identity plus optional correctness-sensitive context capacity, an adapter-configured `defaultMaxTokens`, and ordered model-owned reasoning ids with an optional deployment default; absent fields mean unavailable metadata or provider-owned behavior, not invalid catalog membership. The resolver receives optional cancellation and must settle promptly after abort. `LlmRuntime.resolveModelInfo()` validates and detaches the aggregate. At the final adapter boundary, `resolveCallConfig()` materializes the output default only when `maxTokens` is absent and validates and materializes reasoning, so direct calls cannot bypass either configured behavior; direct dispatch captures one registration before awaiting that resolution. The agent loop instead uses `prepareCall()` to keep the same registration across model resolution, durable header logging, and dispatch, retain detached context metadata from that exact lookup, and report which config fields the adapter defaulted. Adapter lookup happens at the terminal continuation of the `llm/stream` waterfall, so a listener may short-circuit the call or route a mutable one-shot request before lookup. AgentLoop observes a request attempt once the outer waterfall returns a stream handle; that limited boundary does not prove a lazy terminal adapter was constructed or began provider I/O. The `block-start` / `block-end` `index` correlation and the assembler together mean an adapter only has to emit well-formed chunks — block reassembly is not each adapter's problem. [architecture.md](../architecture.md#turn-flow) shows where `ctx.llm.stream()` and the `llm/stream` waterfall sit in one turn.
@@ -1069,9 +1083,11 @@ async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<Prepared
  * finish chunks; middleware, nested-call, cleanup, and consumer failures
  * remain thrown.
  * @param options - the full request; `options.provider` selects the adapter.
+ * @param onDispatch - optional observer of the effective input; routers must preserve request symbol properties when forwarding.
+ *   Observer failures remain thrown; short-circuiting middleware does not notify it.
  * @returns the chunk stream, possibly wrapped by `llm/stream` listeners.
  */
-stream(options: GenerateOptions): AsyncIterable<StreamChunk>
+stream(options: GenerateOptions, onDispatch?: LlmDispatchObserver): AsyncIterable<StreamChunk>
 ```
 
 Types: [FileAttachmentRef](attachment.md)

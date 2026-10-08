@@ -8,19 +8,39 @@ Source: [`packages/compaction/compaction/src/types.ts`](../../packages/compactio
 
 ## The `compaction/*` session events
 
-Compaction extends [`SessionEventMap`](session.md) with three event types via declaration merging. All three are **log-only** — they record the lock, summary, selected range, shadowed event seqs, token count, and model call without joining the surface. `SurfaceEventType` is deliberately NOT extended (only message-producing events reach the model), so the summary itself rides on a separate `user/message` with `surfaceOp: { op: 'replace', startSeq, endSeq }` — the only surface mutation performed by summary compaction. The [historical Agent Note](../../.agents/notes/archived/feature/2026-06-18-compaction-capability-seam.md) records the rationale for reusing `user/message`.
+Compaction declares its three summary lifecycle events through [`SessionEventMap`](session.md) declaration merging. All three are **log-only** — they record the lock, summary, selected range, shadowed event seqs, token count, and model call without joining the surface. `SurfaceEventType` is deliberately NOT extended (only message-producing events reach the model), so the summary itself rides on a separate `user/message` with `surfaceOp: { op: 'replace', startSeq, endSeq }` — the only surface mutation performed by summary compaction. The [historical Agent Note](../../.agents/notes/archived/feature/2026-06-18-compaction-capability-seam.md) records the rationale for reusing `user/message`.
 
 | Event | Payload | Role |
 |---|---|---|
-| `compaction/start` | `{ turn }` | acquires the log-recorded lock; a number identifies the open automatic turn, while `null` identifies a standalone manual attempt |
-| `compaction/summary` | `{ summary, rawOutput?, llmStreamCall?, shadowedRange, shadowedSeqs, shadowedTokenCount, provider, model, maxTokens?, usage? }` | the safe summary projection, optional complete provider output and usage, an `llmStreamCall: true` marker when producing the result consumed exactly one call through this context's `ctx.llm.stream()` (which requires complete `rawOutput`), the shadowed surface-boundary pair (`start`/`end` seqs — a position span, not a numeric interval), the shadowed seqs in surface order, the estimated token count, and the summarize call's envelope (`provider`, `model`, plus its generation cap when one applied) — logged so the one-shot request is reconstructable from log + code (the reconstructability Agent Note); unmarked `rawOutput` does not identify the call path |
-| `compaction/end` | `{ turn, error? }` | releases the lock with the same numeric-or-null owner (`error` records an unsuccessful attempt) |
+| `compaction/start` | `{ compactionId, sourceCommandId?, turn }` | acquires the log-recorded lock; a number identifies the open automatic turn, while `null` identifies a standalone manual attempt |
+| `compaction/summary` | `{ compactionId, sourceCommandId?, summary, rawOutput?, llmStreamCall?, llmCalls?, shadowedRange, shadowedSeqs, shadowedTokenCount, provider, model, maxTokens?, usage? }` | records the completed safe summary, optional full provider output, selected surface boundaries and ordered seqs, shadow price, and final summary model/cap/usage; `llmStreamCall: true` identifies exactly one local stream call and requires `rawOutput`, while `llmCalls` retains ordered bounded-recovery calls |
+| `compaction/end` | `{ compactionId, sourceCommandId?, turn, error?, llmCalls? }` | releases the lock with the same transaction identity and numeric-or-null owner; `error` records an unsuccessful attempt, and optional `llmCalls` retains settled auxiliary calls when no summary was committed |
 
 The lock brackets the **whole** operation: `compaction/start` is appended first, then summarization, the `compaction/summary` record, and the `user/message` replacement all land, and only then `compaction/end`. Releasing the lock last turns a crash mid-operation into a detectable orphaned lock (a `compaction/start` with no matching `compaction/end`) rather than a `compaction/end` that falsely claims compaction finished.
 
 The markers are lock time points, not an exclusive container. An unrelated idle injection can appear between a standalone manual start and end while summarization is pending. The manual path revalidates only its selected positional span, so that injected context survives after the replacement checkpoint. A live unmatched start blocks every entry point; an unmatched start before a newer `session/end-seed` is stale evidence from a prior lifecycle and is ignored.
 
 These variants are merged inside a `declare module '@deepseek-ai/dsh-session/types'` block, so — unlike the top-level types on the other subsystem pages — they are not pasted as a drift-checked ` ```ts type-equiv ` block (the `verify-type-equiv` extractor matches only top-level declarations by name). The payload table above is the catalog entry; follow the source link for the authoritative fields.
+
+## Auxiliary call records
+
+`CompactionLlmCall` retains a settled auxiliary request and its output without process-local cancellation or the enclosing session identity. Ordered collections include overflow settlements before recovery. The single-call marker and a call collection represent different call paths; unmarked `rawOutput` alone does not identify either path. [LLM replay](../../packages/test-support/llm-replay/README.md) consumes the recorded settlements.
+
+```ts type-equiv
+/** A settled auxiliary request retained for bounded-summary reconstruction and replay. */
+interface CompactionLlmCall {
+  /** Complete request without process-local cancellation or the enclosing session's redundant identity. */
+  request: Omit<GenerateOptions, 'signal' | 'sessionId'>
+  /** Complete provider output before text-only checkpoint projection. */
+  rawOutput: ContentBlock[]
+  /** Terminal provider settlement, including a context-overflow attempt that preceded recovery. */
+  finish: FinishReason
+  /** Provider-reported usage, when emitted. */
+  usage?: TokenUsage
+}
+```
+
+After stability and shrink validation, the basic backend records all settled calls with `compaction/summary` when more than one auxiliary call was needed, including warm attempts before recovery; the collection replaces the single-call marker. A single successful warm call keeps that marker. If no summary was committed, a closed failed attempt records its settled calls with `compaction/end`, so one call collection is not written twice. Intermediate fragment and merge checkpoints do not join the surface; failure, cancellation, or truncation produces no partial replacement. Independent pruning and image-offload decisions remain committed. Only terminally settled calls are captured, and a process loss or failed close can leave no durable call record. Its [README](../../packages/compaction/compaction-basic/README.md#understand-the-implementation) owns input budgeting and recovery policy.
 
 <a id="image-offload"></a>
 ## Image offload

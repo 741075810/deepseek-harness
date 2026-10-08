@@ -37,6 +37,14 @@ export type {
   UserMessage,
 } from './message.ts'
 
+/**
+ * Observe the resolved, projected request immediately before adapter dispatch.
+ * Middleware short-circuits do not invoke this synchronous observer.
+ * @param request - effective adapter input, including resolved model defaults.
+ * @param model - metadata bound to the same selected adapter.
+ */
+export type LlmDispatchObserver = (request: GenerateOptions, model: LlmResolvedModelInfo) => void
+
 /** Serializable provider or transport failure facts; policy decides whether they are retryable. */
 export interface LlmFailure {
   /** Human-readable provider or transport failure. */

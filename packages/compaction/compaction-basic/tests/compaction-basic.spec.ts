@@ -317,6 +317,8 @@ describe('compact configuration and defaults', () => {
       summarizationProvider: '',
       summarizationModel: '',
       maxTokens: 65_536,
+      summarizationInputRatio: 0.8,
+      summarizationMaxCalls: 128,
       compactionRetries: 1,
       maxOverflowRetries: 1,
       modelPolicies: [],
@@ -1076,7 +1078,8 @@ describe('compaction region transaction', () => {
     await compact.compactRegion(nodes[1]!, nodes[2]!, agent(session, MODEL), SIGNAL)
 
     const { input } = compact.calls[0]!
-    expect(input).toEqual({ messages: prefix, tools })
+    expect(input).toMatchObject({ messages: prefix, tools })
+    expect(input.recordCall).toEqual(expect.any(Function))
   })
 
   it('omits the summarizer system prompt for an empty system head or a system-less surface', async () => {

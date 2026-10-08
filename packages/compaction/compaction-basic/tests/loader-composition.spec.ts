@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import LlmRuntime, { LlmAdapter, createMessage, createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
+import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
@@ -93,6 +94,63 @@ describe('real Loader composition', () => {
       retainRatio: 0.125,
       auto: false,
     })
+  })
+
+  it('runs bounded summary recovery through the YAML-mounted backend', async () => {
+    const loaded = await loadYaml([
+      "- name: '@deepseek-ai/dsh-llm'",
+      "- name: '@deepseek-ai/dsh-session'",
+      "- name: '@deepseek-ai/dsh-session-projection'",
+      "- name: '@deepseek-ai/dsh-token-meter'",
+      "- name: '@deepseek-ai/dsh-compaction-basic'",
+      '  config:',
+      '    auto: false',
+      '    headroomTokens: 0',
+      '    maxTokens: 128',
+      '    summarizationMaxCalls: 20',
+    ])
+    class Adapter extends LlmAdapter {
+      calls = 0
+      override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+        return Promise.resolve({ provider, id: model, name: model, context: { contextWindow: 8192 } })
+      }
+      override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        this.calls += 1
+        const { signal: _signal, ...request } = options
+        if (Buffer.byteLength(JSON.stringify(request), 'utf8') + (options.maxTokens ?? 0) > 8192) {
+          yield { type: 'finish', reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, message: 'oversized fixture' } } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'bounded loader checkpoint' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    const adapter = new Adapter()
+    loaded.llm.registerAdapter(['mock'], adapter)
+    const session = Session.create(SessionId('loader-bounded'))
+    session.append('turn/start', { turn: 1 })
+    session.append('user/message', createUserMessage({
+      source: { kind: 'user' }, content: [{ type: 'text', text: 'old history '.repeat(4000) }],
+    }), { surfaceOp: 'append' })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('assistant/message', {
+      turn: 1, step: 1, stream: [],
+      message: createMessage({
+        role: 'assistant', content: [{ type: 'text', text: 'acknowledged' }],
+        source: { kind: 'model', provider: 'mock', model: 'small' },
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step: 1 })
+    const nodes = session.surface.nodes
+    const result = await loaded.compaction.compactRegion(nodes[0]!, nodes[1]!, {
+      session, options: { provider: 'mock', model: 'small' },
+    })
+    expect(adapter.calls).toBeGreaterThan(2)
+    expect(result.shadowedSeqs).toHaveLength(2)
+    expect(session.snapshotEvents().filter(event => event.type === 'compaction/summary')).toHaveLength(1)
+    const summary = session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(summary?.data.llmCalls).toHaveLength(adapter.calls)
   })
 
   it('rejects stale token-meter config after Schemastery normalization', async () => {

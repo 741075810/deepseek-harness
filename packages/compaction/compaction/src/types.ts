@@ -7,12 +7,24 @@
  * @module @deepseek-ai/dsh-compaction/types
  */
 
-import type { ContentBlock, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, FinishReason, GenerateOptions, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { CompactionId } from './brand.ts'
 
 export type { CompactionId }
+
+/** A settled auxiliary request retained for bounded-summary reconstruction and replay. */
+export interface CompactionLlmCall {
+  /** Complete request without process-local cancellation or the enclosing session's redundant identity. */
+  request: Omit<GenerateOptions, 'signal' | 'sessionId'>
+  /** Complete provider output before text-only checkpoint projection. */
+  rawOutput: ContentBlock[]
+  /** Terminal provider settlement, including a context-overflow attempt that preceded recovery. */
+  finish: FinishReason
+  /** Provider-reported usage, when emitted. */
+  usage?: TokenUsage
+}
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -51,6 +63,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       maxTokens?: number
       /** Provider-reported token usage for the summarization request, when emitted. */
       usage?: TokenUsage
+      /** Ordered auxiliary calls when bounded recovery replaces the single replay-prefix call. */
+      llmCalls?: CompactionLlmCall[]
     } & (
       | {
         /** Complete provider output before the backend's safe summary projection. */
@@ -69,7 +83,14 @@ declare module '@deepseek-ai/dsh-session/types' {
      * Marks the end of a compaction — log-only, releases the lock. Its owner
      * matches `compaction/start`; `error` records an unsuccessful attempt.
      */
-    'compaction/end': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null; error?: string }
+    'compaction/end': {
+      compactionId: CompactionId
+      sourceCommandId?: CommandId
+      turn: number | null
+      error?: string
+      /** Terminal auxiliary calls not already recorded by a committed summary. */
+      llmCalls?: CompactionLlmCall[]
+    }
     /**
      * Shadow price of one model-free prune replacement — log-only, no
      * surfaceOp. The shared shadow-price protocol: a surface `replace` event

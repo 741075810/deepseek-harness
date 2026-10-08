@@ -13,7 +13,7 @@ import { ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import { resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
 import { inlineImages } from '@deepseek-ai/dsh-llm-deepseek/src/images.ts'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { createAssistantMessage, createToolResultMessage, createUserMessage, projectOffloadedImages, offloadedImageText, IMAGE_OFFLOAD_REQUIRED_CODE, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createToolResultMessage, createUserMessage, projectOffloadedImages, offloadedImageText, IMAGE_OFFLOAD_REQUIRED_CODE, CONTEXT_WINDOW_EXCEEDED_CODE, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { isReplacementSurfaceEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -151,6 +151,25 @@ describe('summary image offload', () => {
     expect(events[span.start]).not.toHaveProperty('data.content.1.offloaded')
     expect(types).not.toContain('compaction/prune')
     expect(types).not.toContain('llm/retry')
+  })
+
+  it('retains every terminal call when overflow recovery offloads images then reuses the warm prefix', async () => {
+    const { compact, agent, adapter } = await summaryHarness([
+      textResponse('answer'),
+      () => { throw new LlmError('oversized summary prefix', CONTEXT_WINDOW_EXCEEDED_CODE) },
+      textResponse('checkpoint after offload'),
+    ])
+    await seedImages(agent, ['first', 'second'])
+    await compact.compactNow(agent, new AbortController().signal)
+    const summary = agent.session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(decisions(agent.session)).toHaveLength(1)
+    expect(adapter.requests).toHaveLength(3)
+    expect(summary?.data.llmCalls).toHaveLength(2)
+    expect(summary?.data.llmCalls?.[0]?.finish).toMatchObject({ kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE } })
+    expect(summary?.data.llmCalls?.[1]?.finish).toEqual({ kind: 'stop' })
+    expect(summary?.data).not.toHaveProperty('llmStreamCall')
+    const end = agent.session.snapshotEvents().find(event => event.type === 'compaction/end')
+    expect(end?.data).not.toHaveProperty('llmCalls')
   })
 
   it('offloads only the selected summary span and stops after exhausting its images', async () => {

@@ -14,7 +14,7 @@ import {
   toolPairingBalancedAfter,
   toolPairingBalancedBefore,
 } from '@deepseek-ai/dsh-compaction'
-import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
+import type { CompactionLlmCall, CompactionResult } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
@@ -217,6 +217,8 @@ export async function compactSurfaceRegion(
   let closed = false
   let closing = false
   let stage: TransactionFailure['stage'] = 'summary'
+  const llmCalls: CompactionLlmCall[] = []
+  const audit = { summaryRecorded: false }
 
   try {
     const prepared = prepareCompaction(dependencies, session, selection)
@@ -227,12 +229,19 @@ export async function compactSurfaceRegion(
       compactionId,
       options.sourceCommandId,
       assertStable,
+      call => llmCalls.push(call),
       signal,
     )
+    const { llmStreamCall: _singleCall, ...unmarked } = summarized
+    const recorded = llmCalls.length > 1
+      ? { ...unmarked, llmCalls }
+      : summarized
     if (options.owner === null) signal?.throwIfAborted()
-    assertStable(dependencies, session, summarized)
+    assertStable(dependencies, session, recorded)
     stage = 'commit'
-    const pending = commitCompactionBody(session, startEvent, summarized)
+    const pending = commitCompactionBody(session, startEvent, recorded, () => {
+      audit.summaryRecorded = true
+    })
     closing = true
     const endEvent = session.append('compaction/end', lifecycle)
     closed = true
@@ -242,7 +251,11 @@ export async function compactSurfaceRegion(
     if (!closing) {
       closing = true
       try {
-        session.append('compaction/end', { ...lifecycle, error: errorChain(error) })
+        session.append('compaction/end', {
+          ...lifecycle,
+          error: errorChain(error),
+          ...audit.summaryRecorded || llmCalls.length === 0 ? {} : { llmCalls },
+        })
         closed = true
       } catch (closeError: unknown) {
         failure = { error: closeError, stage: 'commit' }
@@ -391,13 +404,14 @@ async function summarizeCompaction(
   compactionId: CompactionResult['compactionId'],
   sourceCommandId: CommandId | undefined,
   assertStable: StabilityCheck,
+  recordCall: (call: CompactionLlmCall) => void,
   signal?: AbortSignal,
 ): Promise<SummarizedCompaction> {
   let summaryResult: SummaryResult
   for (;;) {
     signal?.throwIfAborted()
     try {
-      summaryResult = await dependencies.summarize(prepared.input, agent, signal)
+      summaryResult = await dependencies.summarize({ ...prepared.input, recordCall }, agent, signal)
       break
     } catch (error: unknown) {
       if (signal?.aborted === true) throw error
@@ -472,6 +486,7 @@ function commitCompactionBody(
   session: Session,
   startEvent: SessionEvent<'compaction/start'>,
   summarized: SummarizedCompaction,
+  summaryRecorded: () => void,
 ): Omit<CompactionResult, 'endSeq'> {
   const {
     start,
@@ -502,7 +517,9 @@ function commitCompactionBody(
     model,
     ...maxTokens === undefined ? {} : { maxTokens },
     ...usage === undefined ? {} : { usage },
+    ...summarized.llmCalls === undefined ? {} : { llmCalls: summarized.llmCalls },
   })
+  summaryRecorded()
   session.append('user/message', checkpointMessage, {
     surfaceOp: { op: 'replace', startSeq: start, endSeq: end },
     sourceEventSeqs: [startEvent.seq, summaryEvent.seq, ...shadowedSeqs],

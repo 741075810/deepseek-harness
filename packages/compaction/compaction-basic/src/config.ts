@@ -31,6 +31,8 @@ const POLICY_CONFIG_KEYS = [
   'summarizationProvider',
   'summarizationModel',
   'maxTokens',
+  'summarizationInputRatio',
+  'summarizationMaxCalls',
   'compactionRetries',
   'maxOverflowRetries',
 ] as const
@@ -102,6 +104,8 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
     summarizationProvider: config.summarizationProvider ?? '',
     summarizationModel: config.summarizationModel ?? '',
     maxTokens,
+    summarizationInputRatio: config.summarizationInputRatio ?? 0.8,
+    summarizationMaxCalls: config.summarizationMaxCalls ?? 128,
     compactionRetries: config.compactionRetries ?? 1,
     maxOverflowRetries: config.maxOverflowRetries ?? 1,
     modelPolicies,
@@ -133,6 +137,8 @@ export function resolveTargetPolicy(
     summarizationProvider: override?.summarizationProvider ?? config.summarizationProvider,
     summarizationModel: override?.summarizationModel ?? config.summarizationModel,
     maxTokens: override?.maxTokens ?? config.maxTokens,
+    summarizationInputRatio: override?.summarizationInputRatio ?? config.summarizationInputRatio,
+    summarizationMaxCalls: override?.summarizationMaxCalls ?? config.summarizationMaxCalls,
     compactionRetries: override?.compactionRetries ?? config.compactionRetries,
     maxOverflowRetries: override?.maxOverflowRetries ?? config.maxOverflowRetries,
   })
@@ -211,6 +217,8 @@ export function resolveCompactSpec(
     summarizationProvider: policy.summarizationProvider,
     summarizationModel: policy.summarizationModel,
     maxTokens: policy.maxTokens,
+    summarizationInputRatio: policy.summarizationInputRatio,
+    summarizationMaxCalls: policy.summarizationMaxCalls,
     compactionRetries: policy.compactionRetries,
     maxOverflowRetries: policy.maxOverflowRetries,
   })
@@ -293,6 +301,12 @@ function validatePolicy(
     throw new Error(`${name}: retainRatio and retainTokens are mutually exclusive`)
   }
   if (maxTokens !== undefined) assertPositiveInteger(`${name}.maxTokens`, maxTokens)
+  if (config.summarizationInputRatio !== undefined) {
+    assertRatio(`${name}.summarizationInputRatio`, config.summarizationInputRatio)
+  }
+  if (config.summarizationMaxCalls !== undefined) {
+    assertPositiveInteger(`${name}.summarizationMaxCalls`, config.summarizationMaxCalls)
+  }
   if (compactionRetries !== undefined) {
     assertNonNegativeInteger(`${name}.compactionRetries`, compactionRetries)
   }

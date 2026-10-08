@@ -14,6 +14,7 @@ import type {
   RequestMessage,
   LlmConfigurableProvider,
   LlmDiscoveredModel,
+  LlmDispatchObserver,
   LlmFailure,
   LlmImageRequestPricing,
   LlmModelContext,
@@ -53,6 +54,9 @@ export * from './retry-policy.ts'
 export { BlockAssembler } from './assembler.ts'
 export { callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from './call-config.ts'
 export type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
+
+const dispatchObserver = Symbol('llm.dispatchObserver')
+type ObservedOptions = GenerateOptions & { [dispatchObserver]?: LlmDispatchObserver }
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -1028,6 +1032,8 @@ export class LlmRuntime extends TypertRemoteService {
     prepared?: PreparedDispatch,
   ): AsyncGenerator<StreamChunk> {
     let iterator: AsyncIterator<StreamChunk>
+    let startStream: () => AsyncIterator<StreamChunk>
+    let notify: (() => void) | undefined
     try {
       const registration = prepared?.registration ?? this.registration(options.provider)
       const adapter = registration.adapter
@@ -1077,8 +1083,24 @@ export class LlmRuntime extends TypertRemoteService {
         }
         if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions)
       }
-      const stream = dispatch(this.forAdapter(projectedOptions, adapter))
-      iterator = stream[Symbol.asyncIterator]()
+      const adapterOptions = this.forAdapter(projectedOptions, adapter) as ObservedOptions
+      const observer = adapterOptions[dispatchObserver]
+      let input = adapterOptions
+      if (observer !== undefined) {
+        const { [dispatchObserver]: _observer, ...withoutObserver } = adapterOptions
+        input = Object.isFrozen(adapterOptions) ? deepFreeze(withoutObserver) : withoutObserver
+        notify = () => {
+          observer(input, modelInfo)
+        }
+      }
+      startStream = () => dispatch(input)[Symbol.asyncIterator]()
+    } catch (error: unknown) {
+      yield adapterFailureChunk(error, options.signal)
+      return
+    }
+    notify?.()
+    try {
+      iterator = startStream()
     } catch (error: unknown) {
       yield adapterFailureChunk(error, options.signal)
       return
@@ -1123,10 +1145,15 @@ export class LlmRuntime extends TypertRemoteService {
    * finish chunks; middleware, nested-call, cleanup, and consumer failures
    * remain thrown.
    * @param options - the full request; `options.provider` selects the adapter.
+   * @param onDispatch - optional observer of the effective input; routers must preserve request symbol properties when forwarding.
+   *   Observer failures remain thrown; short-circuiting middleware does not notify it.
    * @returns the chunk stream, possibly wrapped by `llm/stream` listeners.
    */
-  stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.streamWithRegistration(options)
+  stream(options: GenerateOptions, onDispatch?: LlmDispatchObserver): AsyncIterable<StreamChunk> {
+    const observed = onDispatch === undefined ? options : { ...options, [dispatchObserver]: onDispatch }
+    return this.streamWithRegistration(
+      onDispatch !== undefined && Object.isFrozen(options) ? deepFreeze(observed) : observed,
+    )
   }
 
   private streamWithRegistration(

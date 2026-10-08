@@ -1,0 +1,9 @@
+version: 1
+scenario: compaction-bounded
+profile: headless
+composition: compaction-bounded
+recording: authored
+header:
+  class: compaction-bounded
+  pin: true
+  changes: 1

@@ -22,6 +22,10 @@ export interface CompactionPolicyConfig {
   summarizationModel?: string
   /** Provider generation cap for summarization. Defaults to the resolved `headroomTokens`; an explicit cap must be positive. */
   maxTokens?: number
+  /** Fraction of the summary model's remaining input capacity used by bounded recovery. Defaults to `0.8`. */
+  summarizationInputRatio?: number
+  /** Total auxiliary calls permitted for one bounded summary, including overflowed attempts. Defaults to `128`. */
+  summarizationMaxCalls?: number
   /** Extra attempts after the first compaction when pressure remains above threshold. Defaults to `1`. */
   compactionRetries?: number
   /** Maximum retries after canonical context overflow; `0` disables recovery. Defaults to `1`. */
@@ -56,6 +60,8 @@ interface ResolvedPolicyFields {
   readonly summarizationProvider: string
   readonly summarizationModel: string
   readonly maxTokens: number
+  readonly summarizationInputRatio: number
+  readonly summarizationMaxCalls: number
   readonly compactionRetries: number
   readonly maxOverflowRetries: number
 }

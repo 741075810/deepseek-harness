@@ -1012,6 +1012,36 @@ describe('deriveReplayScript', () => {
     ])
   })
 
+  it('replays bounded compaction calls in order, including the rejected prefix', () => {
+    const request = { provider: 'mock', model: 'mock', messages: [], maxTokens: 128 }
+    const block = { type: 'text' as const, text: 'merged checkpoint' }
+    const overflow = { kind: 'error' as const, failure: { message: 'large request', code: 'CONTEXT_WINDOW_EXCEEDED' } }
+    const event: SessionEvent<'compaction/summary'> = {
+      type: 'compaction/summary', seq: SessionSeq(1), time: 0,
+      data: {
+        compactionId: COMPACTION_ID, summary: [block], provider: 'mock', model: 'mock',
+        shadowedRange: { start: SessionSeq(0), end: SessionSeq(0) }, shadowedSeqs: [SessionSeq(0)], shadowedTokenCount: 100,
+        llmCalls: [
+          { request, rawOutput: [], finish: overflow },
+          { request, rawOutput: [block], finish: { kind: 'stop' }, usage: { inputTokens: 10, outputTokens: 2 } },
+        ],
+      },
+    }
+    expect(deriveReplayScript([event])).toEqual([
+      { kind: 'chunks', chunks: [{ type: 'finish', reason: overflow }] },
+      { kind: 'chunks', chunks: [
+        { type: 'block-start', index: 0, blockType: 'text' },
+        { type: 'block-end', index: 0, block },
+        { type: 'usage', usage: { inputTokens: 10, outputTokens: 2 } },
+        { type: 'finish', reason: { kind: 'stop' } },
+      ] },
+    ])
+    const ambiguous: SessionEvent<'compaction/summary'> = {
+      ...event, data: { ...event.data, llmStreamCall: true, rawOutput: [block] },
+    }
+    expect(() => deriveReplayScript([ambiguous])).toThrow(/both one stream call and a bounded call collection/)
+  })
+
   it('does not infer an LLM call from compaction/summary without raw output', () => {
     const event: SessionEvent<'compaction/summary'> = {
       type: 'compaction/summary',
