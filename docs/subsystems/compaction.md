@@ -102,6 +102,12 @@ Pressure compaction runs at the `agent/pre-step` waterfall before request deriva
 
 The Service Definition exports `toolPairingBalancedBefore(session, seq)` and `toolPairingBalancedAfter(session, seq)` for the tool-call/result pairing checks before and after a seq. Both validate current surface membership and reject missing seqs and orphan results; the [package contract](../../packages/compaction/compaction/README.md#tool-pairing-boundaries) defines their cache behavior.
 
+## Basic pressure policy updates
+
+The Basic backend owns `PressurePolicyConfig`: a required `thresholdRatio` in `(0, 1]` and optional non-negative integer `headroomTokens`, whose omission preserves each existing value. `PressurePolicyTarget` supplies an exact `{ provider, model }` target, positive integer `contextWindow`, and non-negative integer `reservedCompletionTokens`. These types and the pure `resolveConfig`, `resolveTargetPolicy`, `resolveCompactSpec`, and `withPressurePolicy` functions are exported from `dsh-compaction-basic`, not the abstract seam.
+
+`BasicCompactionEngine.applyPressurePolicy(pressure, targets)` validates the complete new config and every supplied target budget before one synchronous frozen-config replacement. It preserves retention, summary routes and effective generation caps, retries and automatic mode. The [opt-in pressure command](../../packages/compaction/command-compact-policy/README.md) owns public preset/configuration traversal, persistence and per-entry outcome reporting; unknown capacities retain target-time validation.
+
 ## Tool-result pruning outcomes
 
 The optional tool-result pruning service reports each durable content replacement and the aggregate Unicode-code-point reduction. Its public result types live in [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts).

@@ -10,6 +10,7 @@ import type {
   BasicCompactionConfig,
   CompactionPolicyConfig,
   ModelCompactPolicyConfig,
+  PressurePolicyConfig,
   ResolvedCompactSpec,
   ResolvedConfig,
   ResolvedRetention,
@@ -107,6 +108,42 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
     modelPolicies,
     auto: config.auto ?? true,
   })
+}
+
+/**
+ * Derive literal pressure-only configuration, preserving each route's effective
+ * summary cap even when its previous cap was implicit in headroom.
+ * @param config - literal configuration before the update.
+ * @param pressure - replacement pressure settings for defaults and existing overrides.
+ * @returns detached validated configuration; unrelated settings remain unchanged.
+ */
+export function withPressurePolicy(
+  config: BasicCompactionConfig,
+  pressure: PressurePolicyConfig,
+): BasicCompactionConfig {
+  const previous = resolveConfig(config)
+  const next: BasicCompactionConfig = {
+    ...config,
+    thresholdRatio: pressure.thresholdRatio,
+    ...pressure.headroomTokens === undefined ? {} : { headroomTokens: pressure.headroomTokens },
+  }
+  if (pressure.headroomTokens !== undefined && next.maxTokens === undefined
+    && previous.maxTokens !== pressure.headroomTokens) {
+    next.maxTokens = previous.maxTokens
+  }
+  if (config.modelPolicies !== undefined) {
+    next.modelPolicies = config.modelPolicies.map((policy, index) => {
+      const updated = { ...policy, thresholdRatio: pressure.thresholdRatio,
+        ...pressure.headroomTokens === undefined ? {} : { headroomTokens: pressure.headroomTokens } }
+      const previousCap = previous.modelPolicies[index]?.maxTokens ?? previous.maxTokens
+      const nextCap = updated.maxTokens ?? next.maxTokens
+        ?? updated.headroomTokens ?? next.headroomTokens ?? previous.headroomTokens
+      if (previousCap !== nextCap) updated.maxTokens = previousCap
+      return updated
+    })
+  }
+  resolveConfig(next)
+  return next
 }
 
 /**

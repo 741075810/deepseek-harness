@@ -31,6 +31,7 @@ kind: "package-group"
 | [`compaction-tool-result-pruner/`](compaction-tool-result-pruner/README.zh.md) | 修剪超大工具输出，减少需要压缩的历史 | `ctx.toolResultPruner` |
 | [`compaction-image-offload/`](compaction-image-offload/README.zh.md) | 支持图片的路由拒绝请求时，把超出预算的请求图片替换为占位文本 | 监听 `agent/request-error` |
 | [`command-compact/`](command-compact/README.zh.md) | 按需压缩历史的 `/compact` 命令 | 注册到 `ctx.commands` |
+| [`command-compact-policy/`](command-compact-policy/README.zh.md) | 按需启用的 Basic 预设后端检查与纯压力更新 | 注册到 `ctx.commands` |
 
 -----
 

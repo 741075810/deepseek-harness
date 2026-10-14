@@ -102,6 +102,12 @@ type ManualCompactionErrorCode =
 
 该 Service Definition 导出 `toolPairingBalancedBefore(session, seq)` 与 `toolPairingBalancedAfter(session, seq)`，用于检查 seq 之前与之后的工具调用/结果配对。两者都会验证当前 surface 成员关系，并拒绝缺失的 seq 与遗留结果；[包约定](../../packages/compaction/compaction/README.zh.md#tool-pairing-boundaries)定义其缓存行为。
 
+## Basic 压力策略更新
+
+Basic 后端拥有 `PressurePolicyConfig`：必填的 `thresholdRatio` 范围为 `(0, 1]`，可选的 `headroomTokens` 是非负整数，省略时保留各现有值。`PressurePolicyTarget` 提供精确的 `{ provider, model }` 目标、正整数 `contextWindow` 及非负整数 `reservedCompletionTokens`。这些类型以及纯函数 `resolveConfig`、`resolveTargetPolicy`、`resolveCompactSpec` 和 `withPressurePolicy` 从 `dsh-compaction-basic` 导出，不属于抽象 seam。
+
+`BasicCompactionEngine.applyPressurePolicy(pressure, targets)` 在一次同步冻结配置替换前，验证完整的新配置及每个传入目标的预算。它保留保留策略、摘要路由与有效生成上限、重试设置及自动模式。[按需启用的压力命令](../../packages/compaction/command-compact-policy/README.zh.md)拥有公开的预设／配置遍历、持久化与逐条结果报告逻辑；未知容量继续遵循目标使用时验证。
+
 ## 工具结果剪枝产出
 
 可选的工具结果剪枝服务会报告每次持久内容替换以及 Unicode code point 的总减少量。其公开结果类型位于 [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts)。

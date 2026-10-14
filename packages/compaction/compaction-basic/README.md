@@ -128,6 +128,8 @@ The transaction validates the surface span and the durable lock, appends `compac
 
 `resolveConfig` validates and detaches defaults, `resolveTargetPolicy` merges exact provider/model overrides, and `resolveCompactSpec` requires explicit adapter capacity and routed output reservation to resolve the trigger and retained budget. The effective envelope’s `maxTokens` supplies that reservation, falling back to the adapter default and then zero. Model discovery (`listModels()`) is never consulted for policy; only the durable route's capacity matters.
 
+These resolvers and `withPressurePolicy(config, pressure)` are exported from the package root. The latter derives literal pressure-only config while preserving every route's effective summary cap. `BasicCompactionEngine.applyPressurePolicy(pressure, targets)` validates all supplied capacities before synchronously replacing its frozen `config`; retention, automatic listeners, summary routes/caps and retries remain unchanged. The opt-in [pressure command](../command-compact-policy/README.md) owns preset persistence and published-Agent updates.
+
 ### Source map
 
 | File | Role |

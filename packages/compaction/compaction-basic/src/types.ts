@@ -6,6 +6,24 @@
 
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 
+/** Pressure-only settings applied to defaults and every existing exact-target override. */
+export interface PressurePolicyConfig {
+  /** Context-window fraction in (0, 1]. */
+  readonly thresholdRatio: number
+  /** Additional reserved pressure budget; omission preserves each existing value. */
+  readonly headroomTokens?: number
+}
+
+/** Adapter capacity and request reservation to validate before a pressure update. */
+export interface PressurePolicyTarget {
+  /** Exact provider/model route whose policy is validated. */
+  readonly target: Pick<LlmCallConfig, 'provider' | 'model'>
+  /** Adapter-owned context capacity. */
+  readonly contextWindow: number
+  /** Output reservation for this route and request. */
+  readonly reservedCompletionTokens: number
+}
+
 /** Policy fields shared by the default policy and exact model overrides. */
 export interface CompactionPolicyConfig {
   /** Window fraction for pressure; capped at context window minus reserved output and `headroomTokens`. Defaults to `0.8`. */
